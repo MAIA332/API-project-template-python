@@ -1,0 +1,43 @@
+services:
+
+  postgres:
+    image: postgres:15
+    container_name: opaan-postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: OPA
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck: # <--- Adicionado healthcheck para PostgreSQL
+      test: ["CMD-SHELL", "pg_isready -U admin -d RPM"] # Comando para verificar se o DB está pronto
+      interval: 5s # Verifica a cada 5 segundos
+      timeout: 5s # Tempo limite para o comando
+      retries: 5 # Número de tentativas antes de considerar "unhealthy"
+      start_period: 10s # Espera 10s antes de começar a verificar
+
+  mongodb:
+    image: mongo:4.4
+    container_name: opaan-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo_user
+      MONGO_INITDB_ROOT_PASSWORD: mongo_pass
+      MONGO_INITDB_DATABASE: opa-mongo-db
+    volumes:
+      - mongo_data:/data/db
+    healthcheck: # <--- Adicionado healthcheck para MongoDB
+      test: echo 'db.runCommand("ping").ok' | mongo --host localhost:27017 --username mongo_user --password mongo_pass --authenticationDatabase admin rpm-mongo-db --quiet # Comando para verificar se o DB está pronto
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 20s # MongoDB pode demorar um pouco mais para inicializar o auth
+
+volumes:
+  postgres_data:
+  mongo_data:

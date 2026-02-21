@@ -1,0 +1,167 @@
+generator client {
+    provider             = "prisma-client-py"
+    interface            = "asyncio"
+    recursive_type_depth = "5"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// BEGIN SECURITY ===============================>
+enum METHODS {
+    POST
+    GET
+    DELETE
+    PATCH
+}
+
+model Role {
+    id         String @id @default(uuid())
+    name       String
+    identifier String @unique
+    idSector   String
+    Sector     Sector @relation(fields: [idSector], references: [id])
+    User       User[]
+
+    Route Route[]
+
+    @@unique([id, idSector])
+}
+
+model Route {
+    id     String  @id @default(uuid())
+    path   String
+    method METHODS @default(GET)
+    roles  Role[]
+
+    Routers Routers[]
+}
+
+model Sector {
+    id   String @id @default(uuid())
+    name String @unique
+    Role Role[]
+    User User[]
+}
+
+model User {
+    id            String          @id @default(uuid())
+    email         String          @unique
+    name          String
+    description   String?
+    password      String
+    profileImage  String?
+    phoneNumber   String?
+    status        Boolean         @default(true)
+    idSector      String
+    createdAt     DateTime        @default(now())
+    idRole        String
+    Role          Role            @relation(fields: [idRole, idSector], references: [id, idSector])
+    Sector        Sector          @relation(fields: [idSector], references: [id])
+    Notifications Notifications[]
+    Solicitations Solicitations[]
+}
+
+model Notifications {
+    id      String  @id @default(uuid())
+    message String
+    read    Boolean
+    users   User[]
+}
+
+enum SolicitationStatus {
+    QUEUED
+    IN_PROGRESS
+    CONCLUED
+}
+
+model Solicitations {
+    id        String             @id @default(uuid())
+    event     String
+    createdAt DateTime           @default(now())
+    status    SolicitationStatus
+    userId    String
+    user      User               @relation(fields: [userId], references: [id])
+    hash      String             @unique
+}
+
+// END SECURITY ===============================>
+// BEGIN SERVICES ===============================>
+
+model Services {
+    id          String       @id @default(uuid()) @db.Uuid
+    name        String
+    description String       @default("")
+    module      String
+    entryPoint  String
+    parameters  Parameters[]
+    active      Boolean      @default(true)
+    createdAt   DateTime     @default(now())
+    updatedAt   DateTime     @updatedAt
+
+    Pipelines Pipelines[] @relation("services")
+
+    Routers Routers[]
+
+    Controllers   Controllers[]
+}
+
+model Routers {
+    id            String       @id @default(uuid()) @db.Uuid
+    name          String
+    description   String       @default("")
+    module        String
+    entryPoint    String
+    endpoint      String       @unique
+    active        Boolean      @default(true)
+    createdAt     DateTime     @default(now())
+    updatedAt     DateTime     @updatedAt
+    services      Services[]
+    Routes        Route[]
+    Controllers   Controllers? @relation(fields: [controllersId], references: [id])
+    controllersId String?      @db.Uuid
+}
+
+model Controllers {
+    id          String     @id @default(uuid()) @db.Uuid
+    name        String
+    description String     @default("")
+    module      String
+    entryPoint  String
+    active      Boolean    @default(true)
+    createdAt   DateTime   @default(now())
+    updatedAt   DateTime   @updatedAt
+    services    Services[]
+    routers     Routers[]
+}
+
+model Parameters {
+    id          String   @id @default(uuid()) @db.Uuid
+    name        String
+    description String   @default("")
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+
+    Services Services[]
+
+    Pipelines Pipelines[]
+}
+
+// END SERVICES ===============================>
+
+// BEGIN PIPELINES ===============================>
+
+model Pipelines {
+    id          String       @id @default(uuid()) @db.Uuid
+    name        String
+    description String       @default("")
+    active      Boolean
+    module      String
+    entryPoint  String
+    createdAt   DateTime     @default(now())
+    updatedAt   DateTime     @updatedAt
+    services    Services[]   @relation("services")
+    parameters  Parameters[]
+}

@@ -1,0 +1,17 @@
+Jupyter/
+/Jupyter
+logs
+*.log
+*.tmp
+.git
+Jupyter/*
+closeEnv.bat
+count_messages.py
+curlt.bat
+generate.bat
+init.bat
+migrate.bat
+process_logs.py
+startCLI.bat
+startEnv.bat
+studio.bat
