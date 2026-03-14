@@ -1,16 +1,13 @@
 import asyncio
 import json
 import os
-import websockets
 import datetime
-import bcrypt
 from jose import jwt, JWTError, ExpiredSignatureError
+from fastapi import WebSocket, WebSocketDisconnect
 
 class WebSocketServer:
-    def __init__(self, host="localhost", port=8765):
-        self.host = host
-        self.port = port
-        self.clients = {}  # websocket -> {"username": ..., "room": ...}
+    def __init__(self):
+        self.clients = {}  # websocket -> {"ip": ..., "authenticated": ..., "room": ..., "access_token": ...}
         self.rooms = {}    # room_name -> set(websockets)
         self.listeners = {}  # event_name -> list of callbacks
         self._subscriber()
@@ -26,7 +23,7 @@ class WebSocketServer:
             self.listeners[event] = []
         self.listeners[event].append(callback)
 
-    async def _emit(self, event, websocket, payload):
+    async def _emit(self, event, websocket: WebSocket, payload):
         print(f"[{self._now()}]Emitindo evento: {event}")
         if event in self.listeners:
             for callback in self.listeners[event]:
@@ -39,10 +36,10 @@ class WebSocketServer:
         if event in self.listeners:
             self.listeners[event].remove(callback)
 
-    async def _handle_ping(self, websocket, payload):
+    async def _handle_ping(self, websocket: WebSocket, payload):
         """Responde ao cliente que enviou um ping."""
         try:
-            await websocket.send(json.dumps({
+            await websocket.send_text(json.dumps({
                 "event": "pong",
                 "timestamp": self._now(),
                 "payload": payload  # opcional, pode devolver dados recebidos
@@ -51,56 +48,57 @@ class WebSocketServer:
             print(f"[{self._now()}]Erro ao enviar pong: {e}")
 
     # ============== WebSocket Handler ==============
-    async def handler(self, websocket):
-        client_ip = websocket.remote_address[0]
+    async def handler(self, websocket: WebSocket):
+        await websocket.accept()  # Aceita a conexão nativa do FastAPI
+        
+        # O FastAPI mapeia o IP do cliente aqui
+        client_ip = websocket.client.host if websocket.client else "Desconhecido"
         print(f"[{self._now()}]Cliente conectado: {client_ip}")
         
-
+        self.clients[websocket] = {"ip": client_ip, "authenticated": True}
+        
         try:
-            async for raw_message in websocket:
-                # dentro do loop de mensagens
+            while True:
+                # O loop infinito que escuta as mensagens ativamente
+                raw_message = await websocket.receive_text()
                 print(f"[{self._now()}]Mensagem recebida de {client_ip}: {raw_message}")
+                
                 try:
                     message = json.loads(raw_message)
                     event = message.get("event")
                     payload = message.get("payload")
 
                     if not event:
-                        await websocket.send(json.dumps({"error": "Campo 'event' é obrigatório"}))
+                        await websocket.send_text(json.dumps({"error": "Campo 'event' é obrigatório"}))
                         continue
 
-                    if not self.clients.get(websocket, {}).get("authenticated", False) and event != "auth":
-                        await websocket.send(json.dumps({
-                            "event": "error",
-                            "message": f"Evento '{event}' não permitido antes da autenticação"
-                        }))
-                        continue
+                    # Emite o evento internamente para os listeners
                     await self._emit(event, websocket, payload)
 
                 except json.JSONDecodeError:
-                    await websocket.send(json.dumps({"error": "JSON inválido"}))
+                    await websocket.send_text(json.dumps({"error": "JSON inválido"}))
 
-        except websockets.exceptions.ConnectionClosedError:
+        except WebSocketDisconnect:
             print(f"[{self._now()}]Conexão encerrada com {client_ip}")
+        except Exception as e:
+            print(f"[{self._now()}]Erro inesperado na conexão com {client_ip}: {e}")
         finally:
             print(f"[{self._now()}]Cliente desconectado: {client_ip}")
             await self._disconnect(websocket)
     
-
-    async def notify_user(self, user_id: str, message: str,event:str):
+    async def notify_user(self, user_id: str, message: str, event: str):
         for ws, info in self.clients.items():
-            # Decodifica token do cliente para pegar user_id (sub) ou já armazene user_id diretamente ao autenticar
             token = info.get("access_token")
             if not token:
                 continue
             try:
                 payload = jwt.decode(token, os.getenv("ACCESS_SECRET_KEY"), algorithms=["HS256"])
                 if payload.get("sub") == user_id:
-                    await ws.send(json.dumps({"event": event, "message": message}))
+                    await ws.send_text(json.dumps({"event": event, "message": message}))
             except Exception as e:
                 print(f"Erro decodificando token para notificar: {e}")
 
-    async def _disconnect(self, websocket):
+    async def _disconnect(self, websocket: WebSocket):
         """Remove cliente do sistema e das salas."""
         info = self.clients.pop(websocket, None)
         if info and info.get("room"):
@@ -112,20 +110,30 @@ class WebSocketServer:
 
     async def broadcast(self, message: str, room: str = None):
         """Envia uma mensagem para todos os clientes ou apenas para uma sala."""
-        targets = self.rooms.get(room, set()) if room else self.clients.keys()
+        targets = self.rooms.get(room, set()) if room else list(self.clients.keys())
         to_remove = set()
+        
         for client in targets:
             try:
-                await client.send(message)
-            except websockets.exceptions.ConnectionClosed:
+                await client.send_text(message)
+            except Exception:
                 to_remove.add(client)
+                
         for client in to_remove:
             await self._disconnect(client)
 
+    async def send_json(self, data: dict, room: str = None):
+        """Converte um dicionário em JSON e envia via broadcast, tratando datas e timestamps."""
+        try:
+            def json_serial(obj):
+                if hasattr(obj, 'isoformat'):
+                    return obj.isoformat()
+                raise TypeError(f"Tipo {type(obj)} não é serializável")
+
+            message = json.dumps(data, default=json_serial)
+            await self.broadcast(message, room=room)
+        except Exception as e:
+            print(f"[{self._now()}] Erro ao serializar JSON para envio: {e}")
+    
     def _now(self):
         return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    async def start(self):
-        print(f"Servidor WebSocket rodando em ws://{self.host}:{self.port}")
-        async with websockets.serve(self.handler, self.host, self.port):
-            await asyncio.Future()  # roda para sempre

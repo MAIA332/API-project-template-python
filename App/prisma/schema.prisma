@@ -62,6 +62,7 @@ model User {
     Sector        Sector          @relation(fields: [idSector], references: [id])
     Notifications Notifications[]
     Solicitations Solicitations[]
+    alerts        Alerts[]
 }
 
 model Notifications {
@@ -101,11 +102,9 @@ model Services {
     createdAt   DateTime     @default(now())
     updatedAt   DateTime     @updatedAt
 
-    Pipelines Pipelines[] @relation("services")
-
     Routers Routers[]
 
-    Controllers   Controllers[]
+    Controllers Controllers[]
 }
 
 model Routers {
@@ -146,22 +145,102 @@ model Parameters {
 
     Services Services[]
 
-    Pipelines Pipelines[]
+    integrations   Integrations[]
 }
 
 // END SERVICES ===============================>
 
-// BEGIN PIPELINES ===============================>
 
-model Pipelines {
-    id          String       @id @default(uuid()) @db.Uuid
+// BEGIN WORKERS ===============================>
+model Workers {
+    id          String   @id @default(uuid()) @db.Uuid
     name        String
-    description String       @default("")
-    active      Boolean
+    description String   @default("")
+    event       String
     module      String
     entryPoint  String
-    createdAt   DateTime     @default(now())
-    updatedAt   DateTime     @updatedAt
-    services    Services[]   @relation("services")
-    parameters  Parameters[]
+    update_rate Int      @default(0) // Em segundos, 0 para manual
+    dbName      String? // Para armazenar o nome do banco de dados, se necessário
+    beginDate   String? // Para armazenar a data de início, se necessário
+    endDate     String? // Para armazenar a data de término, se necessário
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @default(now())
+    alerts      Alerts[]
 }
+
+// END WORKERS ===============================>
+
+// BEGIN INTEGRATIONS ========================>
+
+model Integrations {
+    id              String           @id @default(uuid())
+    name            String           @unique
+    description     String
+    active          Boolean
+    createdAt       DateTime         @default(now())
+    updatedAt       DateTime         @updatedAt
+    entrypoint      String
+    module          String
+    preferenceOrder Int              @default(0)
+    type            IntegrationsType @default(OTHERS)
+    parameters      Parameters[]
+}
+
+enum IntegrationsType {
+    OTHERS
+    PAYMENTS
+    VIDEOS
+    HOOKS
+}
+
+//END INTEGRATIONS ===========================>
+
+// BEGIN MONITORING ===============================>
+model Alerts {
+    id           String     @id @default(uuid()) @db.Uuid
+    name         String
+    description  String     @default("")
+    active       Boolean    @default(true)
+    event        String //evento que o alerta envia, pode ser um nome de evento ou uma categoria
+    type         AlertTypes @relation(fields: [alertTypesId], references: [id]) //tipo do alerta, pode ser usado para categorizar os alertas e definir comportamentos específicos para cada tipo
+    message      String //mensagem personalizada que será enviada quando o alerta for acionado
+    senderId     String?    @db.Uuid // Para armazenar a relação com o remetente, se necessário
+    Senders      Senders?   @relation(fields: [senderId], references: [id])
+    workerId     String?    @db.Uuid // Para armazenar a relação com o worker, se necessário
+    Workers      Workers?   @relation(fields: [workerId], references: [id])
+    createdAt    DateTime   @default(now())
+    updatedAt    DateTime   @default(now())
+    condition    Json? // Para armazenar condições específicas para o alerta, como thresholds, filtros, etc.
+    target       User[] // Para armazenar os usuários que receberão o alerta, se necessário
+    alertTypesId String     @db.Uuid
+}
+
+model AlertTypes {
+    id         String   @id @default(uuid()) @db.Uuid
+    name       String
+    entryPoint String
+    module     String
+    alerts     Alerts[]
+}
+
+model Senders {
+    id          String      @id @default(uuid()) @db.Uuid
+    name        String
+    description String      @default("")
+    type        SenderTypes //tipo do remetente, pode ser usado para categorizar os remetentes e definir comportamentos específicos para cada tipo
+    config      Json //configurações específicas do remetente, como credenciais de API, número de telefone, etc.
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now())
+    alerts    Alerts[]
+}
+
+enum SenderTypes {
+    EMAIL
+    SMS
+    PUSH_NOTIFICATION
+    WHATSAPP_UNOFFICIAL
+    API
+}
+
+// END MONITORING ===============================>
