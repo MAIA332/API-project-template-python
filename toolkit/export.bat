@@ -2,60 +2,77 @@
 setlocal enabledelayedexpansion
 
 echo ========================================================
-echo   BACKUP TOOLKIT (VIA DOCKER) - MONGODB E POSTGRESQL
+echo   BACKUP TOOLKIT (VIA CONNECTION STRING) - DOCKER REMOTO
 echo ========================================================
 echo.
 
 :: ==========================================
-:: SOLICITACAO DE CREDENCIAIS (INPUT)
+:: 1. CONFIGURACOES DO HOST DOCKER REMOTO
 :: ==========================================
-echo Por favor, insira as credenciais para realizar o backup:
+set "DOCKER_HOST_URI=ssh://maiaserver@192.168.18.14"
+set "DOCKER_HOST=%DOCKER_HOST_URI%"
+
+echo [INFO] Conectando ao Docker remoto em: %DOCKER_HOST_URI%
 echo.
-set /p PG_USER="1. Digite o USUARIO do PostgreSQL (ex: admin): "
-set /p PG_PASS="2. Digite a SENHA do PostgreSQL: "
-echo.
-set /p MONGO_USER="3. Digite o USUARIO do MongoDB (ex: mongo_user): "
-set /p MONGO_PASS="4. Digite a SENHA do MongoDB: "
+echo ========================================================
+echo   INFORME OS DADOS (Aperte ENTER para usar o padrao)
+echo ========================================================
 echo.
 
 :: ==========================================
-:: CONFIGURACOES FIXAS DOS BANCOS E CONTAINERS
+:: 2. INPUTS DO POSTGRESQL
 :: ==========================================
-set PG_DB_NAME=OPA
-set MONGO_DB_NAME=opa-mongo-db
-set MONGO_CONTAINER=opaan-mongodb
-set PG_CONTAINER=opaan-postgres
+echo --- PostgreSQL ---
+set "PG_CONTAINER=meu-postgres"
+set /p "PG_CONTAINER=Container Postgres [%PG_CONTAINER%]: "
 
-:: Monta a URI do Mongo injetando as variaveis digitadas
-set MONGO_URI="mongodb://%MONGO_USER%:%MONGO_PASS%@localhost:27017/%MONGO_DB_NAME%?authSource=admin"
+set "DATABASE_URL=postgres://usuario:senha@192.168.0.x:5432/nome_do_banco"
+set /p "DATABASE_URL=Connection String [%DATABASE_URL%]: "
+echo.
 
+:: ==========================================
+:: 3. INPUTS DO MONGODB
+:: ==========================================
+echo --- MongoDB ---
+set "MONGO_CONTAINER=meu-mongo"
+set /p "MONGO_CONTAINER=Container Mongo [%MONGO_CONTAINER%]: "
+
+set "MONGO_URL=mongodb://usuario:senha@192.168.0.x:27017/?directConnection=true"
+set /p "MONGO_URL=Connection String [%MONGO_URL%]: "
+echo.
+
+:: ==========================================
+:: 4. PREPARACAO DO AMBIENTE E VARIAVEIS
+:: ==========================================
 :: Cria a pasta com a data e hora do backup
 set "t=%TIME: =0%"
 set "timestamp=%DATE:~6,4%%DATE:~3,2%%DATE:~0,2%_%t:~0,2%%t:~3,2%%t:~6,2%"
-set BACKUP_DIR=backups\backup_%timestamp%
+set "BACKUP_DIR=backups\backup_%timestamp%"
 
 mkdir "%BACKUP_DIR%\mongo"
 mkdir "%BACKUP_DIR%\postgres"
 
-echo [1/2] Extraindo dados do MongoDB (Container: %MONGO_CONTAINER%)...
-:: Manda o container gerar o backup la dentro usando a URI com as credenciais inseridas
-docker exec %MONGO_CONTAINER% mongodump --uri=%MONGO_URI% --out="/tmp/mongodump"
-:: Puxa o backup para o Windows
-docker cp %MONGO_CONTAINER%:/tmp/mongodump/%MONGO_DB_NAME% "%BACKUP_DIR%\mongo\%MONGO_DB_NAME%"
-:: Limpa a sujeira dentro do container
+:: ==========================================
+:: 5. EXECUCAO DOS BACKUPS
+:: ==========================================
+echo [1/2] Extraindo dados do MongoDB remoto (Container: %MONGO_CONTAINER%)...
+:: Usa a URI completa. Aspas duplas sao essenciais por causa do '&' ou '?' na URL
+docker exec %MONGO_CONTAINER% mongodump --uri="%MONGO_URL%" --out="/tmp/mongodump"
+:: Copia o diretorio inteiro de dump, garantindo que pega todos os bancos exportados
+docker cp %MONGO_CONTAINER%:/tmp/mongodump "%BACKUP_DIR%\mongo"
+:: Limpa a sujeira
 docker exec %MONGO_CONTAINER% rm -rf /tmp/mongodump
 
 echo.
-echo [2/2] Extraindo dados do PostgreSQL (Container: %PG_CONTAINER%)...
-:: Manda o container gerar o dump do Postgres usando as credenciais inseridas
-docker exec -e PGPASSWORD=%PG_PASS% -t %PG_CONTAINER% pg_dump -U %PG_USER% -F c -f /tmp/prisma.dump %PG_DB_NAME%
-:: Puxa o arquivo para o Windows
-docker cp %PG_CONTAINER%:/tmp/prisma.dump "%BACKUP_DIR%\postgres\prisma.dump"
-:: Limpa a sujeira
-docker exec %PG_CONTAINER% rm /tmp/prisma.dump
+echo [2/2] Extraindo dados do PostgreSQL remoto (Container: %PG_CONTAINER%)...
+:: O pg_dump aceita a URL de conexao completa no lugar do nome do banco
+docker exec -t %PG_CONTAINER% pg_dump "%DATABASE_URL%" -F c -f /tmp/pg_backup.dump
+docker cp %PG_CONTAINER%:/tmp/pg_backup.dump "%BACKUP_DIR%\postgres\pg_backup.dump"
+docker exec %PG_CONTAINER% rm /tmp/pg_backup.dump
 
 echo.
 echo ========================================================
-echo  SUCESSO! Backup salvo em: %BACKUP_DIR%
+echo  SUCESSO! Backup salvo localmente em:
+echo  %CD%\%BACKUP_DIR%
 echo ========================================================
 pause
