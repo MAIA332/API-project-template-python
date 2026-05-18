@@ -244,3 +244,11 @@ enum SenderTypes {
 }
 
 // END MONITORING ===============================>
+model Databases {
+    id          String  @id @default(uuid()) @db.Uuid
+    name        String
+    description String  @default("")
+    active      Boolean @default(true)
+    entryPoint  String
+    module      String
+}
