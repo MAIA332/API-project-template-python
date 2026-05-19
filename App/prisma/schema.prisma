@@ -15,6 +15,7 @@ enum METHODS {
     GET
     DELETE
     PATCH
+    PUT
 }
 
 model Role {
