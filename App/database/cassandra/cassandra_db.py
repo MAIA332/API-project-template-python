@@ -147,7 +147,6 @@ class CassandraConnection:
     # ==================== LÓGICA DE ORM / MIGRATIONS ====================
 
     def _load_models_from_schema(self, module_name: str):
-        # A string abaixo deve refletir o caminho exato do seu arquivo de models do Cassandra
         import_path = f"database.cassandra.{module_name}"
         try:
             module = importlib.import_module(import_path)
@@ -161,6 +160,9 @@ class CassandraConnection:
                 try:
                     model = func(self.keyspace)
                     model_classes.append(model)
+                    
+                    setattr(self, model.__name__, model)
+                    
                 except Exception as e:
                     logging.error(f"Erro ao carregar modelo '{name}': {e}")
         return model_classes
